@@ -10,18 +10,18 @@ from sklearn.model_selection import StratifiedKFold
 import gc
 import torch
 
-from .config import Config
+from .config import TrainingConfig
 from .training import finetune_model
 
 
 def run_hp_search_optuna(
-    config: Config,
+    config: TrainingConfig,
     df_trainval: pd.DataFrame,
     label2id: Dict,
     id2label: Dict,
     num_labels: int,
     text_column: str,
-) -> Tuple[Config, pd.DataFrame]:
+) -> Tuple[TrainingConfig, pd.DataFrame]:
     """
     Optuna hyperparameter search with:
     - Pruning for efficiency
@@ -59,16 +59,7 @@ def run_hp_search_optuna(
         trial_config.BATCH_SIZE = trial.suggest_categorical("batch_size", [16, 24, 32])
         trial_config.WEIGHT_DECAY = trial.suggest_float("weight_decay", 0.0, 0.15)
         trial_config.WARMUP_RATIO = trial.suggest_float("warmup_ratio", 0.05, 0.2)
-
-        # Loss function parameters
-        if config.USE_CLASS_WEIGHTS and config.USE_PRIORITY_SCORES:
-            trial_config.ALPHA = trial.suggest_float("alpha", 0.2, 0.8)
-
-        if config.USE_FOCAL_LOSS:
-            trial_config.FOCAL_GAMMA = trial.suggest_float("focal_gamma", 0.5, 3.0)
-            trial_config.LABEL_SMOOTHING = trial.suggest_float(
-                "label_smoothing", 0.0, 0.1
-            )
+        trial_config.LABEL_SMOOTHING = trial.suggest_float("label_smoothing", 0.0, 0.1)
 
         # K-Fold cross-validation
         skf = StratifiedKFold(n_splits=config.K_FOLDS, shuffle=True, random_state=42)
@@ -105,12 +96,11 @@ def run_hp_search_optuna(
                 torch.cuda.empty_cache()
 
                 # Optuna pruning (stop bad trials early)
-                if config.USE_PRUNING:
-                    current_avg_f1 = np.mean(fold_f1_scores)
-                    trial.report(current_avg_f1, step=fold)
-                    if trial.should_prune():
-                        logging.info(f"Pruning Trial {trial.number} at Fold {fold+1}")
-                        raise optuna.exceptions.TrialPruned()
+                current_avg_f1 = np.mean(fold_f1_scores)
+                trial.report(current_avg_f1, step=fold)
+                if trial.should_prune():
+                    logging.info(f"Pruning Trial {trial.number} at Fold {fold+1}")
+                    raise optuna.exceptions.TrialPruned()
 
         except optuna.exceptions.TrialPruned:
             raise
@@ -127,12 +117,8 @@ def run_hp_search_optuna(
         return avg_f1
 
     # Create Optuna study with pruning
-    pruner = (
-        optuna.pruners.MedianPruner(
-            n_startup_trials=5, n_warmup_steps=2, interval_steps=1
-        )
-        if config.USE_PRUNING
-        else optuna.pruners.NopPruner()
+    pruner = optuna.pruners.MedianPruner(
+        n_startup_trials=5, n_warmup_steps=2, interval_steps=1
     )
 
     study = optuna.create_study(

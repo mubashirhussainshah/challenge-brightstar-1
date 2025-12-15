@@ -14,13 +14,13 @@ from transformers import (
 from sklearn.model_selection import train_test_split
 from .data import IntentDataset
 from .utils import compute_loss_weights, compute_metrics
-from .trainer import FocalTrainer, RDropTrainer
-from .config import Config
+from .trainer import CustomTrainer
+from .config import TrainingConfig
 from typing import List, Dict, Optional
 
 
 def finetune_model(
-    config: Config,
+    config: TrainingConfig,
     tokenizer: AutoTokenizer,
     train_texts: List[str],
     train_labels: List[int],
@@ -54,23 +54,15 @@ def finetune_model(
 
     # Compute loss weights
     final_weights = None
-    if config.USE_CLASS_WEIGHTS or config.USE_PRIORITY_SCORES:
-        final_weights = compute_loss_weights(
-            labels=train_labels,
-            json_path=config.PRIORITY_SCORES_PATH,
-            id2label=id2label,
-            num_labels=num_labels,
-            use_balance=config.USE_CLASS_WEIGHTS,
-            use_priority=config.USE_PRIORITY_SCORES,
-            alpha=config.ALPHA,
-        )
+    if config.USE_CLASS_WEIGHTS:
+        final_weights = compute_loss_weights(labels=train_labels, num_labels=num_labels)
 
     # Training arguments
     args = TrainingArguments(
         output_dir=f"{config.CHECKPOINT_DIR}/fold_{fold_id}",
         overwrite_output_dir=True,
         eval_strategy=IntervalStrategy.EPOCH,
-        save_strategy="no",
+        save_strategy="epoch",
         learning_rate=config.LEARNING_RATE,
         per_device_train_batch_size=config.BATCH_SIZE,
         per_device_eval_batch_size=config.BATCH_SIZE,
@@ -78,7 +70,7 @@ def finetune_model(
         weight_decay=config.WEIGHT_DECAY,
         warmup_ratio=config.WARMUP_RATIO,
         metric_for_best_model="f1",
-        load_best_model_at_end=False,
+        load_best_model_at_end=True,
         greater_is_better=True,
         fp16=config.USE_MIXED_PRECISION,
         logging_steps=50,
@@ -88,9 +80,8 @@ def finetune_model(
 
     # Select trainer class
     data_collator = DataCollatorWithPadding(tokenizer, padding=True)
-    TrainerClass = RDropTrainer if config.USE_RDROP else FocalTrainer
 
-    trainer = TrainerClass(
+    trainer = CustomTrainer(
         model=model,
         args=args,
         train_dataset=train_dataset,
@@ -103,10 +94,7 @@ def finetune_model(
             )
         ],
         loss_weights=final_weights,
-        gamma=config.FOCAL_GAMMA,
         label_smoothing=config.LABEL_SMOOTHING,
-        use_focal_loss=config.USE_FOCAL_LOSS,
-        # rdrop_alpha=5.0
     )
 
     # Train
@@ -133,7 +121,7 @@ def finetune_model(
 
 
 def train_final_model(
-    config: Config,
+    config: TrainingConfig,
     df_trainval: pd.DataFrame,
     label2id: Dict,
     id2label: Dict,
@@ -183,6 +171,6 @@ def train_final_model(
     logging.info(f"Model saved to: {model_save_path}")
 
     # Save configuration
-    config.save(f"{model_save_path}/training_config.json")
+    config.to_json(f"{model_save_path}/training_config.json")
 
     return model_save_path

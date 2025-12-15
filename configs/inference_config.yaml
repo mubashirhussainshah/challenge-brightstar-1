@@ -1,0 +1,22 @@
+# --- Model Paths ---
+MODEL_PATH: "models/intent_classification_model"
+LLM_MODEL_ID: "meta-llama/Llama-3.2-3B-Instruct"
+INTENT_DESCRIPTION_PATH: "data/intent_description.json"
+
+# --- Classification Parameters ---
+TEMPERATURE: 1.2
+CONFIDENCE_THRESHOLD: 0.65
+MAX_LEN: 128
+BATCH_SIZE: 32
+
+# --- LLM Normalization Settings ---
+LLM_MAX_NEW_TOKENS: 64
+LLM_TEMPERATURE: 0.1
+NORMALIZE_BATCH_SIZE: 1
+
+# --- Checkpoints & Logging ---
+SAVE_CHECKPOINTS: true
+CHECKPOINT_DIR: "checkpoints"
+LOG_LEVEL: "INFO"
+# LOG_FILE can be set to a specific path like "logs/inference.log" or left null
+LOG_FILE: null

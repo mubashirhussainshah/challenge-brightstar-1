@@ -39,79 +39,40 @@ def compute_metrics(eval_pred):
     return {"accuracy": accuracy, "f1": f1_weighted, "f1_macro": f1_macro}
 
 
-def compute_loss_weights(
-    labels: List[int],
-    json_path: str,
-    id2label: Dict[int, str],
-    num_labels: int,
-    use_balance: bool = True,
-    use_priority: bool = True,
-    alpha: float = 0.5,
-) -> torch.Tensor:
+def compute_loss_weights(labels: List[int], num_labels: int) -> torch.Tensor:
     """
-    Computes combined weights for loss function.
-
-    Args:
-        alpha: 0=priority only, 1=balance only, 0.5=equal mix
+    Computes weights for loss function based solely on class balance (Inverse Frequency).
     """
-    balance_weights = np.ones(num_labels, dtype=np.float32)
-    priority_weights = np.ones(num_labels, dtype=np.float32)
+    counts = np.bincount(labels, minlength=num_labels)
 
-    # Class balance weights
-    if use_balance:
-        counts = np.bincount(labels, minlength=num_labels)
-        safe_counts = np.where(counts == 0, 1, counts)
-        total = len(labels)
-        balance_weights = total / (num_labels * safe_counts.astype(np.float32))
-        balance_weights = normalize_weights(balance_weights, min_val=0.5, max_val=2.0)
-        logging.info(
-            f"Class balance weights: {balance_weights.min():.3f} - {balance_weights.max():.3f}"
-        )
+    # Handle zero counts to avoid division by zero
+    safe_counts = np.where(counts == 0, 1, counts)
 
-    # Priority weights
-    if use_priority and os.path.exists(json_path):
-        with open(json_path, "r") as f:
-            descriptions = json.load(f)
-        priority_map = {item["intent"]: item["priority"] for item in descriptions}
-        priorities = np.array(
-            [priority_map.get(id2label[i], 50) for i in range(num_labels)]
-        )
-        priority_weights = 0.5 + 1.5 * (priorities / 100.0)
-        logging.info(
-            f"Priority weights: {priority_weights.min():.3f} - {priority_weights.max():.3f}"
-        )
+    # Compute Inverse Class Frequency
+    total = len(labels)
+    weights = total / (num_labels * safe_counts.astype(np.float32))
 
-    # Combine weights
-    if use_balance and use_priority:
-        final_weights = alpha * balance_weights + (1 - alpha) * priority_weights
-        logging.info(f"Combined weights (α={alpha:.2f})")
-    elif use_balance:
-        final_weights = balance_weights
-    elif use_priority:
-        final_weights = priority_weights
-    else:
-        final_weights = np.ones(num_labels, dtype=np.float32)
+    # Normalize to prevent exploding gradients for rare classes
+    weights = normalize_weights(weights, min_val=0.5, max_val=2.0)
 
-    # Normalize to mean=1.0 and clip extremes
-    final_weights = final_weights / final_weights.mean()
-    final_weights = np.clip(final_weights, 0.1, 10.0)
+    # Ensure mean is 1.0 to maintain loss scale
+    weights = weights / weights.mean()
 
     logging.info(
-        f"Final weights: {final_weights.min():.3f} - {final_weights.max():.3f}"
+        f"Class balance weights: Min={weights.min():.3f}, Max={weights.max():.3f}"
     )
 
-    return torch.tensor(final_weights, dtype=torch.float32)
+    return torch.tensor(weights, dtype=torch.float32)
 
 
 def normalize_weights(
     weights: np.ndarray, min_val: float = 0.5, max_val: float = 2.0
 ) -> np.ndarray:
-    """
-    Min-max normalization to [min_val, max_val]
-    """
+    """Min-max normalization helper"""
     w_min, w_max = weights.min(), weights.max()
+
     if w_max - w_min < 1e-6:
         return np.ones_like(weights) * ((min_val + max_val) / 2)
-    normalized = (weights - w_min) / (w_max - w_min)
 
+    normalized = (weights - w_min) / (w_max - w_min)
     return min_val + (max_val - min_val) * normalized

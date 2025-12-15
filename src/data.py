@@ -3,7 +3,7 @@ from torch.utils.data import Dataset
 from sklearn.model_selection import train_test_split
 from typing import List, Dict, Tuple
 from transformers import AutoTokenizer
-from . import config
+from .config import TrainingConfig
 import logging
 
 
@@ -54,7 +54,7 @@ class IntentDataset(Dataset):
 
 
 def load_and_prep_data(
-    config: config.Config,
+    config: TrainingConfig,
 ) -> Tuple[pd.DataFrame, pd.DataFrame, Dict, Dict, int]:
     """Load and prepare dataset with stratified split"""
     logging.info("=" * 70)
@@ -66,21 +66,25 @@ def load_and_prep_data(
     df = df.dropna(subset=[config.RAW_TEXT_COLUMN, config.LABEL_COLUMN])
     df[config.RAW_TEXT_COLUMN] = df[config.RAW_TEXT_COLUMN].astype(str).str.strip()
     df.reset_index(drop=True, inplace=True)
-    logging.info(f"Loaded {len(df)} samples")
 
     # Stratified split
-    df_trainval, df_test = train_test_split(
+    df_trainval, df_test_valid = train_test_split(
         df,
         test_size=config.TEST_SIZE,
         random_state=config.SEED,
         stratify=df[config.LABEL_COLUMN],
     )
 
+    df_test = pd.concat([df_test_valid])
+    df_test = df_test.sample(frac=1, random_state=config.SEED).reset_index(drop=True)
+
     # Create label mappings
     target_intents = sorted(df[config.LABEL_COLUMN].unique())
     num_labels = len(target_intents)
+
     label2id = {label: i for i, label in enumerate(target_intents)}
     id2label = {i: label for i, label in enumerate(target_intents)}
+
     logging.info(f"Model will train on {num_labels} valid intents.")
 
     # Show distribution
@@ -90,7 +94,9 @@ def load_and_prep_data(
         logging.info(f"  {intent[:50]:50s} : {count:4d} ({count/len(df)*100:5.2f}%)")
 
     df_trainval["labels"] = df_trainval[config.LABEL_COLUMN].map(label2id)
-    df_test["labels"] = df_test[config.LABEL_COLUMN].map(label2id)
+    df_test["labels"] = (
+        df_test[config.LABEL_COLUMN].map(label2id).fillna(-1).astype(int)
+    )
 
     # Save splits
     df_trainval.to_csv(config.TRAINVAL_SET_PATH, index=False)
