@@ -103,10 +103,6 @@ Il tuo compito è trasformare il parlato rumoroso in una frase sintetica e forma
                 "output": "la lisprinter il nuovo terminale per le ricariche non funziona",
             },
             {
-                "input": "Sì grazie forse più tardi però eh sì devo rimanere Sì addirittura 50 euro sì eh visto che",
-                "output": "Sì grazie forse più tardi però eh sì devo rimanere Sì addirittura 50 euro sì eh visto che",
-            },
-            {
                 "input": "Buongiorno non ho ancora ricevuto un ordine di Gratta e Vinci fatto settimana scorsa",
                 "output": "non ho ricevuto un ordine di Gratta e Vinci",
             },
@@ -135,20 +131,6 @@ Il tuo compito è trasformare il parlato rumoroso in una frase sintetica e forma
                 "output": "non parte il terminale stamattina",
             },
         ]
-        self._cached_few_shot_messages = self._build_cached_few_shot_messages()
-
-    def _build_cached_few_shot_messages(self) -> List[Dict]:
-        """
-        Build and cache the few-shot messages once.
-        These are static and reused across all calls.
-        """
-        messages: List[Dict] = []
-
-        for example in self.few_shot_examples:
-            messages.append({"role": "user", "content": f"Input: {example['input']}"})
-            messages.append({"role": "assistant", "content": example["output"]})
-
-        return messages
 
     def _preprocess_text(self, text: str) -> str:
         """
@@ -197,16 +179,17 @@ L'utente sta richiedendo assistenza su un servizio B2B. Identifica il problema p
         preprocessed_text: str,
         predicted_intent: Optional[str] = None,
     ) -> List[Dict]:
-        """Build the chat template with cached few-shot messages."""
+        """Build the chat template."""
+
         system_content = self._build_system_prompt(predicted_intent)
+        messages = [{"role": "system", "content": system_content}]
+
+        for example in self.few_shot_examples:
+            messages.append({"role": "user", "content": f"Input: {example['input']}"})
+            messages.append({"role": "assistant", "content": example["output"]})
 
         final_input = preprocessed_text if len(preprocessed_text) > 3 else raw_sentence
-
-        messages = (
-            [{"role": "system", "content": system_content}]
-            + self._cached_few_shot_messages
-            + [{"role": "user", "content": f"Input: {final_input}"}]
-        )
+        messages.append({"role": "user", "content": f"Input: {final_input}"})
 
         return messages
 
