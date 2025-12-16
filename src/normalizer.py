@@ -261,38 +261,3 @@ L'utente sta richiedendo assistenza su un servizio B2B. Identifica il problema p
         except Exception as e:
             print(f"Error in LLM normalization: {e}")
             return clean_text  # Fallback
-
-    def normalize_batch(
-        self,
-        sentences: List[str],
-        predicted_intents: Optional[List[str]] = None,
-        batch_size: int = 1,
-        show_progress: bool = True,
-    ) -> List[str]:
-        """
-        Normalize a list of sentences.
-
-        Args:
-            sentences: List of text strings.
-            predicted_intents: List of intent strings (must be same length as sentences).
-        """
-        results = []
-
-        # Handle case where no intents are provided
-        if predicted_intents is None:
-            predicted_intents = [None] * len(sentences)
-
-        if len(sentences) != len(predicted_intents):
-            raise ValueError("Length mismatch between sentences and predicted intents")
-
-        iterator = zip(sentences, predicted_intents)
-        if show_progress:
-            iterator = tqdm(
-                iterator, total=len(sentences), desc="Normalizing", unit="msg"
-            )
-
-        for text, intent in iterator:
-            res = self.normalize_sentence(text, predicted_intent=intent)
-            results.append(res)
-
-        return results
