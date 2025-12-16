@@ -1,6 +1,5 @@
 import copy
 import gc
-import logging
 import torch
 import pandas as pd
 from transformers import (
@@ -18,10 +17,14 @@ from .trainer import CustomTrainer
 from .config import TrainingConfig
 from typing import List, Dict, Optional
 
+from src.utils import setup_logging
+from src.logging_config import LoggingConfig
+
 
 def finetune_model(
     config: TrainingConfig,
     tokenizer: AutoTokenizer,
+    logger,
     train_texts: List[str],
     train_labels: List[int],
     val_texts: List[str],
@@ -35,7 +38,7 @@ def finetune_model(
     model_save_path: Optional[str] = None,
 ) -> float:
     """Train model on a single fold"""
-    logging.info(f"Training Fold {fold_id}...")
+    logger.info(f"Training Fold {fold_id}...")
 
     train_dataset = IntentDataset(train_texts, train_labels, tokenizer, config.MAX_LEN)
     val_dataset = IntentDataset(val_texts, val_labels, tokenizer, config.MAX_LEN)
@@ -105,12 +108,12 @@ def finetune_model(
     eval_f1_scores = [entry["eval_f1"] for entry in log_history if "eval_f1" in entry]
     best_f1 = max(eval_f1_scores) if eval_f1_scores else trainer.evaluate()["eval_f1"]
 
-    logging.info(f"Fold {fold_id}: Best F1 = {best_f1:.4f}")
+    logger.info(f"Fold {fold_id}: Best F1 = {best_f1:.4f}")
 
     if save_model and model_save_path:
         trainer.save_model(model_save_path)
         tokenizer.save_pretrained(model_save_path)
-        logging.info(f"Model saved to {model_save_path}")
+        logger.info(f"Model saved to {model_save_path}")
 
     # Cleanup
     del model, trainer
@@ -127,16 +130,17 @@ def train_final_model(
     id2label: Dict,
     num_labels: int,
     text_column: str,
+    logger,
     model_save_suffix: str = "",
 ) -> str:
     """Train final model on full trainval set with best hyperparameters"""
     model_save_path = f"{config.MODEL_SAVE_PATH}{model_save_suffix}"
 
-    logging.info("=" * 70)
-    logging.info("TRAINING FINAL MODEL")
-    logging.info("=" * 70)
-    logging.info(f"Using optimized hyperparameters:")
-    logging.info(
+    logger.info("=" * 70)
+    logger.info("TRAINING FINAL MODEL")
+    logger.info("=" * 70)
+    logger.info(f"Using optimized hyperparameters:")
+    logger.info(
         f"  LR={config.LEARNING_RATE:.2e}, BS={config.BATCH_SIZE}, WD={config.WEIGHT_DECAY:.3f}"
     )
 
@@ -155,6 +159,7 @@ def train_final_model(
     best_f1 = finetune_model(
         config=config,
         tokenizer=tokenizer,
+        logger=logger,
         train_texts=train_texts,
         train_labels=train_labels,
         val_texts=val_texts,
@@ -167,8 +172,8 @@ def train_final_model(
         model_save_path=model_save_path,
     )
 
-    logging.info(f"Final model training complete. Val F1: {best_f1:.4f}")
-    logging.info(f"Model saved to: {model_save_path}")
+    logger.info(f"Final model training complete. Val F1: {best_f1:.4f}")
+    logger.info(f"Model saved to: {model_save_path}")
 
     # Save configuration
     config.to_json(f"{model_save_path}/training_config.json")

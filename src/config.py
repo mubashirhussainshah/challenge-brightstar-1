@@ -1,5 +1,6 @@
 import json
 import yaml
+import logging
 from dataclasses import dataclass, asdict
 from typing import Dict, Any, Optional
 from pathlib import Path
@@ -41,10 +42,88 @@ class TrainingConfig:
     # Cross-validation
     K_FOLDS: int = 5
     OPTUNA_N_TRIALS: int = 30
+    OPTUNA_TIMEOUT: Optional[int] = None
+    BEST_PARAMS_PATH: str = "checkpoints/best_params.json"
 
     # Output paths
     MODEL_SAVE_PATH: str = "models/italian_intent_model"
     CHECKPOINT_DIR: str = "checkpoints"
+
+    def __post_init__(self):
+        """Validate configuration after initialization"""
+        self._validate()
+
+    def _validate(self):
+        """Comprehensive validation of configuration parameters"""
+        errors = []
+
+        # Data validation
+        if not 0 < self.TEST_SIZE < 1:
+            errors.append(f"TEST_SIZE must be between 0 and 1, got {self.TEST_SIZE}")
+
+        if self.SEED < 0:
+            errors.append(f"SEED must be non-negative, got {self.SEED}")
+
+        # Model validation
+        if self.MAX_LEN < 1 or self.MAX_LEN > 512:
+            errors.append(f"MAX_LEN must be between 1 and 512, got {self.MAX_LEN}")
+
+        # Training hyperparameters validation
+        if self.BATCH_SIZE < 1:
+            errors.append(f"BATCH_SIZE must be positive, got {self.BATCH_SIZE}")
+
+        if self.EPOCHS < 1:
+            errors.append(f"EPOCHS must be positive, got {self.EPOCHS}")
+
+        if self.LEARNING_RATE <= 0:
+            errors.append(f"LEARNING_RATE must be positive, got {self.LEARNING_RATE}")
+
+        if not 0 <= self.WEIGHT_DECAY <= 1:
+            errors.append(
+                f"WEIGHT_DECAY must be between 0 and 1, got {self.WEIGHT_DECAY}"
+            )
+
+        if not 0 <= self.WARMUP_RATIO <= 1:
+            errors.append(
+                f"WARMUP_RATIO must be between 0 and 1, got {self.WARMUP_RATIO}"
+            )
+
+        if self.GRADIENT_CLIP <= 0:
+            errors.append(f"GRADIENT_CLIP must be positive, got {self.GRADIENT_CLIP}")
+
+        # Advanced features validation
+        if not 0 <= self.LABEL_SMOOTHING < 0.5:
+            errors.append(
+                f"LABEL_SMOOTHING must be between 0 and 0.5, got {self.LABEL_SMOOTHING}"
+            )
+
+        if self.EARLY_STOPPING_PATIENCE < 1:
+            errors.append(
+                f"EARLY_STOPPING_PATIENCE must be positive, got {self.EARLY_STOPPING_PATIENCE}"
+            )
+
+        # Cross-validation validation
+        if self.K_FOLDS < 2:
+            errors.append(f"K_FOLDS must be at least 2, got {self.K_FOLDS}")
+
+        if self.OPTUNA_N_TRIALS < 1:
+            errors.append(
+                f"OPTUNA_N_TRIALS must be positive, got {self.OPTUNA_N_TRIALS}"
+            )
+
+        if self.OPTUNA_TIMEOUT is not None and self.OPTUNA_TIMEOUT < 1:
+            errors.append(
+                f"OPTUNA_TIMEOUT must be positive or None, got {self.OPTUNA_TIMEOUT}"
+            )
+
+        # Raise all errors at once for better user experience
+        if errors:
+            raise ValueError(
+                f"Configuration validation failed with {len(errors)} error(s):\n"
+                + "\n".join(f"  - {err}" for err in errors)
+            )
+
+        logging.debug("Configuration validation passed")
 
     @classmethod
     def from_dict(cls, config_dict: Dict[str, Any]) -> "TrainingConfig":
@@ -115,9 +194,73 @@ class InferenceConfig:
     SAVE_CHECKPOINTS: bool = True
     CHECKPOINT_DIR: str = "checkpoints"
 
+    # Input validation
+    MAX_TEXT_LENGTH: int = 512  # Maximum allowed input text length
+
     # Logging
     LOG_LEVEL: str = "INFO"
     LOG_FILE: Optional[str] = None
+
+    def __post_init__(self):
+        """Validate configuration after initialization"""
+        self._validate()
+
+    def _validate(self):
+        """Comprehensive validation of configuration parameters"""
+        errors = []
+
+        # Inference parameters validation
+        if self.TEMPERATURE <= 0:
+            errors.append(f"TEMPERATURE must be positive, got {self.TEMPERATURE}")
+
+        if not 0 <= self.CONFIDENCE_THRESHOLD <= 1:
+            errors.append(
+                f"CONFIDENCE_THRESHOLD must be between 0 and 1, got {self.CONFIDENCE_THRESHOLD}"
+            )
+
+        if self.MAX_LEN < 1 or self.MAX_LEN > 512:
+            errors.append(f"MAX_LEN must be between 1 and 512, got {self.MAX_LEN}")
+
+        if self.BATCH_SIZE < 1:
+            errors.append(f"BATCH_SIZE must be positive, got {self.BATCH_SIZE}")
+
+        # LLM parameters validation
+        if self.LLM_MAX_NEW_TOKENS < 1:
+            errors.append(
+                f"LLM_MAX_NEW_TOKENS must be positive, got {self.LLM_MAX_NEW_TOKENS}"
+            )
+
+        if self.LLM_TEMPERATURE < 0:
+            errors.append(
+                f"LLM_TEMPERATURE must be non-negative, got {self.LLM_TEMPERATURE}"
+            )
+
+        if self.NORMALIZE_BATCH_SIZE < 1:
+            errors.append(
+                f"NORMALIZE_BATCH_SIZE must be positive, got {self.NORMALIZE_BATCH_SIZE}"
+            )
+
+        # Input validation
+        if self.MAX_TEXT_LENGTH < 1:
+            errors.append(
+                f"MAX_TEXT_LENGTH must be positive, got {self.MAX_TEXT_LENGTH}"
+            )
+
+        # Logging validation
+        valid_log_levels = ["DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"]
+        if self.LOG_LEVEL.upper() not in valid_log_levels:
+            errors.append(
+                f"LOG_LEVEL must be one of {valid_log_levels}, got {self.LOG_LEVEL}"
+            )
+
+        # Raise all errors at once
+        if errors:
+            raise ValueError(
+                f"Configuration validation failed with {len(errors)} error(s):\n"
+                + "\n".join(f"  - {err}" for err in errors)
+            )
+
+        logging.debug("Configuration validation passed")
 
     @classmethod
     def from_dict(cls, config_dict: Dict[str, Any]) -> "InferenceConfig":

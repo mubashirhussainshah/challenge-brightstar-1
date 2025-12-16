@@ -28,9 +28,10 @@ USE_MIXED_PRECISION: true
 LABEL_SMOOTHING: 0.1
 EARLY_STOPPING_PATIENCE: 5
 
-# --- Cross-Validation ---
+# --- Cross-Validation and Optuna ---
 K_FOLDS: 5
 OPTUNA_N_TRIALS: 30
+BEST_PARAMS_PATH: str = "checkpoints/best_params.json"
 
 # --- Output Paths ---
 MODEL_SAVE_PATH: "models/intent_classification_model"

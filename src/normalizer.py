@@ -1,5 +1,6 @@
 import re
 import torch
+import logging
 from tqdm.auto import tqdm
 from typing import List, Dict, Optional
 from transformers import BitsAndBytesConfig, AutoTokenizer, AutoModelForCausalLM
@@ -15,6 +16,7 @@ class ItalianSentenceNormalizer:
         self,
         model_id: str = "meta-llama/Llama-3.2-3B-Instruct",
         intent_list: Optional[List[Dict]] = None,
+        logger: Optional[logging.Logger] = None,
     ):
         """
         Initialize the normalizer with 4-bit quantized model.
@@ -23,7 +25,8 @@ class ItalianSentenceNormalizer:
             model_id: HuggingFace model identifier
             intent_list: List of intent dictionaries with 'intent' and 'description' keys
         """
-        print(f"Initializing 4-bit quantized model: {model_id}")
+        self.logger = logger or logging.getLogger(__name__)
+        self.logger.info(f"Initializing 4-bit quantized model: {model_id}")
 
         self.intent_map = {}
         if intent_list:
@@ -44,7 +47,7 @@ class ItalianSentenceNormalizer:
             if self.tokenizer.pad_token is None:
                 self.tokenizer.pad_token = self.tokenizer.eos_token
         except Exception as e:
-            print(f"Error: Could not load tokenizer for {model_id}.")
+            self.logger.error(f"Error: Could not load tokenizer for {model_id}.")
             raise e
 
         # Load model with quantization
@@ -56,9 +59,9 @@ class ItalianSentenceNormalizer:
                 device_map="auto",
                 torch_dtype=torch.bfloat16,
             )
-            print("Model loaded successfully.")
+            self.logger.info("Model loaded successfully.")
         except Exception as e:
-            print(f"Error: Could not load model {model_id}.")
+            self.logger.error(f"Error: Could not load model {model_id}.")
             raise e
 
         self._define_static_assets()
