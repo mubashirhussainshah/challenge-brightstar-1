@@ -63,8 +63,8 @@ def load_and_prep_data(
 
     # Read and sanitize dataset
     df = pd.read_csv(config.MAIN_DATA_FILE)
-    df = df.dropna(subset=[config.RAW_TEXT_COLUMN, config.LABEL_COLUMN])
-    df[config.RAW_TEXT_COLUMN] = df[config.RAW_TEXT_COLUMN].astype(str).str.strip()
+    df = df.dropna(subset=[config.TEXT_COLUMN, config.LABEL_COLUMN])
+    df[config.TEXT_COLUMN] = df[config.TEXT_COLUMN].astype(str).str.strip()
     df.reset_index(drop=True, inplace=True)
 
     # Stratified split

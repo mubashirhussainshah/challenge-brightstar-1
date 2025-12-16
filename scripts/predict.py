@@ -80,7 +80,11 @@ def calculate_summary_status(
 
 
 def run_inference_pipeline(
-    config: InferenceConfig, input_path: str, output_path: str, logger
+    config: InferenceConfig,
+    input_path: str,
+    output_path: str,
+    logger,
+    enable_llm: bool = True,
 ):
     """
     Runs the pipeline using the provided config and explicit file paths.
@@ -171,7 +175,7 @@ def run_inference_pipeline(
             )
             with open(config.INTENT_DESCRIPTION_PATH, "r", encoding="utf-8") as f:
                 intents_context = json.load(f)
-            logger.info(f"✓ Loaded {len(intents_context)} intent descriptions")
+            logger.info(f"Loaded {len(intents_context)} intent descriptions")
         else:
             logger.warning(
                 f"Intent description file not found: {config.INTENT_DESCRIPTION_PATH}"
@@ -182,25 +186,18 @@ def run_inference_pipeline(
         logger.info(f"Loading normalizer LLM: {config.LLM_MODEL_ID}")
 
         # Load prompt config if specified
-        prompt_config_path = getattr(config, "NORMALIZER_PROMPT_CONFIG", None)
-        if prompt_config_path and os.path.exists(prompt_config_path):
-            logger.info(f"Using prompt config: {prompt_config_path}")
-            normalizer = ItalianSentenceNormalizer(
-                config.LLM_MODEL_ID, intent_list=intents_context
-            )
-        else:
-            if prompt_config_path:
-                logger.warning(
-                    f"Prompt config not found: {prompt_config_path}, using defaults"
-                )
-            normalizer = ItalianSentenceNormalizer(
-                config.LLM_MODEL_ID, intent_list=intents_context
-            )
+        normalizer = ItalianSentenceNormalizer(
+            config.LLM_MODEL_ID,
+            intent_list=intents_context,
+            examples_path=config.EXAMPLES_PATH,
+            enable_llm=enable_llm,
+            logger=logger,
+        )
 
         logger.info("Normalizer loaded")
 
         # Run normalization
-        logger.info("Starting normalization (this may take a while)...")
+        logger.info(f"Starting normalization (LLM Mode: {enable_llm})...")
         normalized_phrases = []
 
         for phrase, intent in tqdm(
@@ -328,6 +325,13 @@ Examples:
         help="Path to save the results CSV. If not provided, auto-generated from input name.",
     )
 
+    # Optional: output file
+    parser.add_argument(
+        "--disable-llm",
+        action="store_true",
+        help="Disable LLM normalization (uses Regex only).",
+    )
+
     # Logging configuration options
     parser.add_argument(
         "--log-level",
@@ -346,6 +350,8 @@ Examples:
     )
 
     args = parser.parse_args()
+
+    enable_llm_logic = not args.disable_llm
 
     # Setup logging
     setup_logging(level=args.log_level, log_file=args.log_file)
@@ -384,7 +390,13 @@ Examples:
 
     # Run pipeline
     try:
-        run_inference_pipeline(config, args.input, output_path, logger)
+        run_inference_pipeline(
+            config=config,
+            input_path=args.input,
+            output_path=output_path,
+            logger=logger,
+            enable_llm=enable_llm_logic,
+        )
         logger.info("")
         logger.info("Pipeline completed successfully!")
         sys.exit(0)

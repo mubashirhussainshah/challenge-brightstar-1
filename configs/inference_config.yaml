@@ -1,7 +1,7 @@
 # --- Model Paths ---
 MODEL_PATH: "models/intent_classification_model"
-LLM_MODEL_ID: "meta-llama/Llama-3.2-3B-Instruct"
 INTENT_DESCRIPTION_PATH: "data/intent_description.json"
+EXAMPLES_PATH: "data/examples.json"
 
 # --- Classification Parameters ---
 TEMPERATURE: 1.2
@@ -10,6 +10,7 @@ MAX_LEN: 128
 BATCH_SIZE: 32
 
 # --- LLM Normalization Settings ---
+LLM_MODEL_ID: "meta-llama/Llama-3.2-3B-Instruct"
 LLM_MAX_NEW_TOKENS: 64
 LLM_TEMPERATURE: 0.1
 NORMALIZE_BATCH_SIZE: 1

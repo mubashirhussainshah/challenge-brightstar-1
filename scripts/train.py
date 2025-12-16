@@ -93,7 +93,7 @@ def run_training_pipeline(
             label2id=label2id,
             id2label=id2label,
             num_labels=num_labels,
-            text_column=config.RAW_TEXT_COLUMN,
+            text_column=config.TEXT_COLUMN,
             logger=logger,
         )
 

@@ -1,5 +1,7 @@
 import re
 import torch
+import json
+import os
 import logging
 from tqdm.auto import tqdm
 from typing import List, Dict, Optional
@@ -16,6 +18,8 @@ class ItalianSentenceNormalizer:
         self,
         model_id: str = "meta-llama/Llama-3.2-3B-Instruct",
         intent_list: Optional[List[Dict]] = None,
+        examples_path: Optional[str] = None,
+        enable_llm: bool = True,
         logger: Optional[logging.Logger] = None,
     ):
         """
@@ -26,6 +30,48 @@ class ItalianSentenceNormalizer:
             intent_list: List of intent dictionaries with 'intent' and 'description' keys
         """
         self.logger = logger or logging.getLogger(__name__)
+        self.enable_llm = enable_llm
+        self.examples_path = examples_path
+
+        self._define_static_assets()
+
+        self._load_examples()
+
+        if self.enable_llm:
+            self._init_llm(model_id, intent_list)
+        else:
+            self.logger.info(
+                "LLM normalization is DISABLED. Running in rule-based mode only."
+            )
+
+        self.logger.info("Normalizer initialized successfully.")
+
+    def _load_examples(self):
+        """
+        Loads examples from JSON file.
+        If file doesn't exist or is empty, defaults to NO examples (0-shot).
+        """
+        self.examples = []
+
+        if self.examples_path and os.path.exists(self.examples_path):
+            try:
+                with open(self.examples_path, "r", encoding="utf-8") as f:
+                    data = json.load(f)
+                    if isinstance(data, list) and len(data) > 0:
+                        self.examples = data
+                        self.logger.info(
+                            f"Loaded {len(data)} examples from {self.examples_path}"
+                        )
+                    else:
+                        self.logger.warning(
+                            f"Examples file {self.examples_path} is empty or invalid. Using 0-shot mode."
+                        )
+            except Exception as e:
+                self.logger.error(f"Failed to load examples: {e}. Using 0-shot mode.")
+        else:
+            self.logger.info("No examples file found. Using 0-shot mode.")
+
+    def _init_llm(self, model_id: str, intent_list: Optional[List[Dict]]):
         self.logger.info(f"Initializing 4-bit quantized model: {model_id}")
 
         self.intent_map = {}
@@ -51,7 +97,7 @@ class ItalianSentenceNormalizer:
             raise e
 
         # Load model with quantization
-        print("Loading model with 4-bit quantization...")
+        self.logger.info("Loading model with 4-bit quantization...")
         try:
             self.model = AutoModelForCausalLM.from_pretrained(
                 model_id,
@@ -63,13 +109,6 @@ class ItalianSentenceNormalizer:
         except Exception as e:
             self.logger.error(f"Error: Could not load model {model_id}.")
             raise e
-
-        self._define_static_assets()
-        print("Normalizer initialized successfully.")
-        # Build system prompt with intent descriptions
-        # self.intent_descriptions = intent_data or []
-        # self._build_system_prompt()
-        # self._define_few_shot_examples()
 
     def _define_static_assets(self) -> None:
         """Define regex patterns and few-shot examples."""
@@ -83,54 +122,6 @@ class ItalianSentenceNormalizer:
 
         self.base_system_instruction = """Sei un assistente esperto in normalizzazione di testi per call center B2B (Lotto, POS, Servizi).
 Il tuo compito è trasformare il parlato rumoroso in una frase sintetica e formale."""
-
-        # Few-shot examples
-        self.few_shot_examples = [
-            {
-                "input": "cambiando società Brightstar Spa non è passato il pagamento e quindi è saltato il pagamento di 1355 perché cè il mandato nuovo",
-                "output": "non è passato il pagamento di 1355 per mandato nuovo",
-            },
-            {
-                "input": "Mi scusi volevo sapere Come ottenere una nuova carta POS dopo il furto che l'ho persa",
-                "output": "ottenere una nuova carta POS dopo il furto",
-            },
-            {
-                "input": "Senta scusi il rotolino dellotto non entra nel terminale è difettoso cioè non gira",
-                "output": "il rotolino dellotto non entra nel terminale è difettoso",
-            },
-            {
-                "input": "Cho la lisprinter il nuovo terminale per le ricariche per liste qua non mi funziona bene",
-                "output": "la lisprinter il nuovo terminale per le ricariche non funziona",
-            },
-            {
-                "input": "Buongiorno non ho ancora ricevuto un ordine di Gratta e Vinci fatto settimana scorsa",
-                "output": "non ho ricevuto un ordine di Gratta e Vinci",
-            },
-            {
-                "input": "Praticamente ho il monitor della macchina del Lotto spento tutto nero",
-                "output": "monitor della macchina del Lotto spento",
-            },
-            {
-                "input": "Cosa significa il messaggio codice confezione errato che mi appare sul display",
-                "output": "messaggio codice confezione errato",
-            },
-            {
-                "input": "non mi funziona il lettore dei Gratta e Vinci nella macchinetta igt non legge il codice",
-                "output": "non funziona il lettore dei Gratta e Vinci nella macchinetta igt",
-            },
-            {
-                "input": "ho il terminale bloccato da sabato mattina non riesco a fare nulla",
-                "output": "terminale bloccato",
-            },
-            {
-                "input": "Dovrei registrare i pacchi che mi sono arrivati della della bstack",
-                "output": "Dovrei registrare i pacchi arrivati della bstack",
-            },
-            {
-                "input": "Sì sì sì 14 331 71 14 685 da 10 non parte il terminale stamattina",
-                "output": "non parte il terminale stamattina",
-            },
-        ]
 
     def _preprocess_text(self, text: str) -> str:
         """
@@ -177,14 +168,14 @@ L'utente sta richiedendo assistenza su un servizio B2B. Identifica il problema p
         self,
         raw_sentence: str,
         preprocessed_text: str,
-        predicted_intent: Optional[str] = None,
+        intent: Optional[str] = None,
     ) -> List[Dict]:
         """Build the chat template."""
 
-        system_content = self._build_system_prompt(predicted_intent)
+        system_content = self._build_system_prompt(intent)
         messages = [{"role": "system", "content": system_content}]
 
-        for example in self.few_shot_examples:
+        for example in self.examples:
             messages.append({"role": "user", "content": f"Input: {example['input']}"})
             messages.append({"role": "assistant", "content": example["output"]})
 
@@ -227,10 +218,10 @@ L'utente sta richiedendo assistenza su un servizio B2B. Identifica il problema p
         clean_text = self._preprocess_text(raw_sentence)
 
         # If regex stripped everything, return raw_sentence
-        if not clean_text:
+        if not clean_text or len(clean_text.split()) < 3:
             return raw_sentence
 
-        if len(clean_text.split()) < 3:
+        if not self.enable_llm:
             return clean_text
 
         try:
@@ -268,8 +259,8 @@ L'utente sta richiedendo assistenza su un servizio B2B. Identifica il problema p
             return self._validate_output(output, clean_text)
 
         except Exception as e:
-            print(f"Error in normalization: {e}")
-            return raw_sentence  # Fallback to original
+            print(f"Error in LLM normalization: {e}")
+            return clean_text  # Fallback
 
     def normalize_batch(
         self,

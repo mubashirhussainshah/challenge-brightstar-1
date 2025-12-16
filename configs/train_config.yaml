@@ -1,6 +1,6 @@
 # --- Data Configuration ---
 MAIN_DATA_FILE: "data/match_sentences.csv"
-RAW_TEXT_COLUMN: "text"
+TEXT_COLUMN: "text"
 LABEL_COLUMN: "intent"
 
 # Intermediate processed files (automatically created during training)

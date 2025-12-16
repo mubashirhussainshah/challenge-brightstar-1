@@ -12,7 +12,7 @@ class TrainingConfig:
 
     # Data paths
     MAIN_DATA_FILE: str = "data/match_sentences.csv"
-    RAW_TEXT_COLUMN: str = "text"
+    TEXT_COLUMN: str = "text"
     LABEL_COLUMN: str = "intent"
 
     TEST_SET_PATH: str = "data/processed/final_test_set.csv"
@@ -175,8 +175,8 @@ class InferenceConfig:
 
     # Model paths
     MODEL_PATH: str = "models/italian_intent_model"
-    LLM_MODEL_ID: str = "meta-llama/Llama-3.2-3B-Instruct"
     INTENT_DESCRIPTION_PATH: str = "data/intent_description.json"
+    EXAMPLES_PATH: str = "data/examples.json"
 
     # Inference parameters
     TEMPERATURE: float = 1.0
@@ -185,6 +185,7 @@ class InferenceConfig:
     BATCH_SIZE: int = 32
 
     # LLM normalization settings
+    LLM_MODEL_ID: str = "meta-llama/Llama-3.2-3B-Instruct"
     LLM_MAX_NEW_TOKENS: int = 64
     LLM_TEMPERATURE: float = 0.1
     NORMALIZE_BATCH_SIZE: int = 1
