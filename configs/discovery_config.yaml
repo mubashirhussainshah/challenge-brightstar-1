@@ -1,0 +1,46 @@
+# --- Discovery Configuration ---
+# For finding new intents in UNLISTED sentences
+
+# --- Data Paths ---
+INPUT_FILE: "data/unlisted_sentences.csv"
+TEXT_COLUMN: "text"
+OUTPUT_DIR: "intent_discovery_results"
+OUTPUT_CSV: "discovered_intents.csv"
+
+# --- Model Configuration ---
+EMBEDDING_MODEL: "paraphrase-multilingual-MiniLM-L12-v2"
+LLM_MODEL_ID: "meta-llama/Llama-3.2-3B-Instruct"
+
+# --- UMAP Parameters (Dimensionality Reduction) ---
+UMAP_N_NEIGHBORS: 15       # Lower = more local structure, Higher = more global
+UMAP_N_COMPONENTS: 15      # Number of dimensions to reduce to
+UMAP_MIN_DIST: 0.0         # Minimum distance between points in low-dim space
+UMAP_METRIC: "cosine"      # Distance metric
+
+# --- HDBSCAN Parameters (Clustering) ---
+MIN_CLUSTER_SIZE: 30       # Minimum sentences per cluster (adjust based on data size)
+MIN_SAMPLES: 3             # Core point threshold for density
+HDBSCAN_METRIC: "euclidean"
+
+# --- LLM Labeling Parameters ---
+LLM_MAX_NEW_TOKENS: 30     # Maximum tokens for topic label
+LLM_TEMPERATURE: 0.1       # Low for deterministic labels
+
+# --- Text Processing ---
+TOP_N_WORDS: 10            # Top N keywords per topic
+MIN_DF: 2                  # Minimum document frequency for words
+
+# --- Preprocessing ---
+MIN_TEXT_LENGTH: 5
+MAX_TEXT_LENGTH: 500
+MIN_WORDS_AFTER_CLEANING: 3
+
+# --- Discovery Thresholds ---
+MIN_SENTENCES_FOR_DISCOVERY: 100  # Minimum UNLISTED sentences needed
+
+# --- General ---
+SEED: 42
+
+# --- Visualization ---
+CREATE_VISUALIZATIONS: true
+VIZ_OUTPUT_DIR: "intent_discovery_results/visualizations"

@@ -5,6 +5,7 @@ from typing import List, Dict, Tuple
 from transformers import AutoTokenizer
 from .config import TrainingConfig
 from pathlib import Path
+from .logging_config import LoggingConfig
 
 
 class IntentDataset(Dataset):
@@ -104,3 +105,51 @@ def load_and_prep_data(
     df_test.to_csv(config.TEST_SET_PATH, index=False)
 
     return df_trainval, df_test, label2id, id2label, num_labels
+
+
+def filter_unlisted_sentences(
+    input_file: str,
+    input_text_column: str,
+    output_text_column: str,
+    output_path: str = "unlisted_dataset.csv",
+):
+    """
+    Filter sentences marked as UNLISTED from predictions output.
+
+    Args:
+        input_file: Path to predictions CSV (output from predict.py)
+        text_column: Name of the text column
+
+    Returns:
+        DataFrame with only UNLISTED sentences
+    """
+    logger = LoggingConfig.get_logger(__name__)
+
+    logger.info(f"Loading data from: {input_file}")
+    df = pd.read_csv(input_file)
+    unlisted_df = pd.DataFrame()
+
+    # Check if this is a predictions file with Topic tool column
+    if "Topic tool" in df.columns:
+        unlisted_df = df[df["Topic tool"] == "UNLISTED"].copy()
+        logger.info(
+            f"Found {len(unlisted_df)} UNLISTED sentences out of {len(df)} total"
+        )
+    else:
+        # Assume all sentences need discovery
+        logger.warning("No 'Topic tool' column found. Processing all sentences.")
+        unlisted_df = df.copy()
+
+    # Rename column to match expected name
+    if input_text_column in df.columns and input_text_column != output_text_column:
+        unlisted_df[output_text_column] = unlisted_df[input_text_column]
+
+    if output_text_column not in unlisted_df.columns:
+        raise ValueError(
+            f"Could not find text column. Available: {list(unlisted_df.columns)}"
+        )
+
+    Path(output_path).parent.mkdir(parents=True, exist_ok=True)
+    unlisted_df.to_csv(output_path, index=False, encoding="utf-8-sig")
+
+    return unlisted_df

@@ -2,7 +2,7 @@ import json
 import yaml
 import logging
 from dataclasses import dataclass, asdict
-from typing import Dict, Any, Optional
+from typing import Dict, Any, Optional, Tuple
 from pathlib import Path
 
 
@@ -305,3 +305,164 @@ class InferenceConfig:
         current_dict = self.to_dict()
         current_dict.update(kwargs)
         return InferenceConfig.from_dict(current_dict)
+
+
+@dataclass
+class DiscoveryConfig:
+    """Configuration for intent discovery from UNLISTED sentences"""
+
+    # Data
+    INPUT_FILE: str = "data/unlisted_sentences.csv"
+    TEXT_COLUMN: str = "text"
+
+    OUTPUT_DIR: str = "intent_discovery_results"
+    OUTPUT_CSV: str = "discovered_intents.csv"
+
+    # Model selection
+    EMBEDDING_MODEL: str = "paraphrase-multilingual-MiniLM-L12-v2"
+    LLM_MODEL_ID: str = "meta-llama/Llama-3.2-3B-Instruct"
+
+    # UMAP parameters (dimensionality reduction)
+    UMAP_N_NEIGHBORS: int = 15  # Smaller = more local structure
+    UMAP_N_COMPONENTS: int = 15  # Dimensions to reduce to
+    UMAP_MIN_DIST: float = 0.0
+    UMAP_METRIC: str = "cosine"
+
+    # HDBSCAN parameters (clustering)
+    MIN_CLUSTER_SIZE: int = 30  # Minimum sentences per cluster
+    MIN_SAMPLES: int = 5  # Core point threshold
+    HDBSCAN_METRIC: str = "euclidean"
+
+    # LLM labeling parameters
+    LLM_MAX_NEW_TOKENS: int = 30
+    LLM_TEMPERATURE: float = 0.1
+
+    # Text processing
+    TOP_N_WORDS: int = 10
+    MIN_DF: int = 2  # Minimum document frequency
+    N_GRAM_RANGE: Tuple[int, int] = (1, 2)
+
+    # Preprocessing
+    MIN_TEXT_LENGTH: int = 5
+    MAX_TEXT_LENGTH: int = 500
+    MIN_WORDS_AFTER_CLEANING: int = 3
+
+    # Minimum sentences needed for discovery
+    MIN_SENTENCES_FOR_DISCOVERY: int = 100
+
+    # General
+    SEED: int = 42
+
+    # Visualization
+    CREATE_VISUALIZATIONS: bool = True
+    VIZ_OUTPUT_DIR: str = "intent_discovery_results/visualizations"
+
+    def __post_init__(self):
+        """Validate configuration after initialization"""
+        self._validate()
+
+    def _validate(self):
+        """Validate configuration parameters"""
+        errors = []
+
+        # UMAP validation
+        if self.UMAP_N_NEIGHBORS < 2:
+            errors.append(
+                f"UMAP_N_NEIGHBORS must be at least 2, got {self.UMAP_N_NEIGHBORS}"
+            )
+
+        if self.UMAP_N_COMPONENTS < 2:
+            errors.append(
+                f"UMAP_N_COMPONENTS must be at least 2, got {self.UMAP_N_COMPONENTS}"
+            )
+
+        if not 0 <= self.UMAP_MIN_DIST <= 1:
+            errors.append(
+                f"UMAP_MIN_DIST must be between 0 and 1, got {self.UMAP_MIN_DIST}"
+            )
+
+        # HDBSCAN validation
+        if self.MIN_CLUSTER_SIZE < 2:
+            errors.append(
+                f"MIN_CLUSTER_SIZE must be at least 2, got {self.MIN_CLUSTER_SIZE}"
+            )
+
+        if self.MIN_SAMPLES < 1:
+            errors.append(f"MIN_SAMPLES must be at least 1, got {self.MIN_SAMPLES}")
+
+        # LLM validation
+        if self.LLM_MAX_NEW_TOKENS < 1:
+            errors.append(
+                f"LLM_MAX_NEW_TOKENS must be positive, got {self.LLM_MAX_NEW_TOKENS}"
+            )
+
+        if self.LLM_TEMPERATURE < 0:
+            errors.append(
+                f"LLM_TEMPERATURE must be non-negative, got {self.LLM_TEMPERATURE}"
+            )
+
+        # Text processing validation
+        if self.TOP_N_WORDS < 1:
+            errors.append(f"TOP_N_WORDS must be positive, got {self.TOP_N_WORDS}")
+
+        if self.MIN_DF < 1:
+            errors.append(f"MIN_DF must be positive, got {self.MIN_DF}")
+
+        if (
+            not isinstance(self.N_GRAM_RANGE, tuple)
+            or len(self.N_GRAM_RANGE) != 2
+            or self.N_GRAM_RANGE[0] > self.N_GRAM_RANGE[1]
+        ):
+            errors.append(f"Invalid N_GRAM_RANGE: {self.N_GRAM_RANGE}")
+
+        # General validation
+        if self.MIN_SENTENCES_FOR_DISCOVERY < self.MIN_CLUSTER_SIZE:
+            errors.append(
+                f"MIN_SENTENCES_FOR_DISCOVERY ({self.MIN_SENTENCES_FOR_DISCOVERY}) "
+                f"must be >= MIN_CLUSTER_SIZE ({self.MIN_CLUSTER_SIZE})"
+            )
+
+        if errors:
+            raise ValueError(
+                f"Configuration validation failed with {len(errors)} error(s):\n"
+                + "\n".join(f"  - {err}" for err in errors)
+            )
+
+        logging.debug("DiscoveryConfig validation passed")
+
+    @classmethod
+    def from_dict(cls, config_dict: Dict[str, Any]) -> "DiscoveryConfig":
+        """Create config from dictionary, ignoring unknown keys."""
+        valid_fields = {f.name for f in cls.__dataclass_fields__.values()}
+        filtered = {k: v for k, v in config_dict.items() if k in valid_fields}
+        return cls(**filtered)
+
+    @classmethod
+    def from_json(cls, filepath: str) -> "DiscoveryConfig":
+        """Load configuration from JSON file."""
+        with open(filepath, "r") as f:
+            config_dict = json.load(f)
+        return cls.from_dict(config_dict)
+
+    @classmethod
+    def from_yaml(cls, filepath: str) -> "DiscoveryConfig":
+        """Load configuration from YAML file."""
+        with open(filepath, "r") as f:
+            config_dict = yaml.safe_load(f)
+        return cls.from_dict(config_dict)
+
+    def to_dict(self) -> Dict[str, Any]:
+        """Convert config to dictionary."""
+        return asdict(self)
+
+    def to_json(self, filepath: str) -> None:
+        """Save configuration to JSON file."""
+        Path(filepath).parent.mkdir(parents=True, exist_ok=True)
+        with open(filepath, "w") as f:
+            json.dump(self.to_dict(), f, indent=2)
+
+    def to_yaml(self, filepath: str) -> None:
+        """Save configuration to YAML file."""
+        Path(filepath).parent.mkdir(parents=True, exist_ok=True)
+        with open(filepath, "w") as f:
+            yaml.dump(self.to_dict(), f, default_flow_style=False)
