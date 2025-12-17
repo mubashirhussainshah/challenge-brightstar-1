@@ -1,19 +1,20 @@
-import sys
-import os
 import argparse
-import pandas as pd
+import os
+import sys
 from pathlib import Path
 from typing import Optional
+
+import pandas as pd
 from bertopic import BERTopic
 
 # Add project root to sys.path
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
 
 from src.config import DiscoveryConfig
-from src.intent_discovery import IntentDiscoveryPipeline
-from src.utils import setup_logging
-from src.logging_config import LoggingConfig
 from src.data import filter_unlisted_sentences
+from src.intent_discovery import IntentDiscoveryPipeline
+from src.logging_config import LoggingConfig
+from src.utils import setup_logging
 
 
 def print_discovery_report(
@@ -178,7 +179,9 @@ def run_discovery_pipeline(
         logger.info("STEP 3/4: EVALUATING CLUSTERS")
         logger.info("-" * 70)
 
-        metrics = pipeline.evaluate_clustering(cleaned_texts, topics)
+        metrics = pipeline.evaluate_clustering(
+            cleaned_texts, topics, coherence_metric="euclidean"
+        )
 
         metrics_path = os.path.join(config.OUTPUT_DIR, "clustering_metrics.csv")
         Path(metrics_path).parent.mkdir(parents=True, exist_ok=True)
@@ -198,6 +201,7 @@ def run_discovery_pipeline(
         df_results = pipeline.save_results(
             df_unlisted, valid_indices, topics, output_path
         )
+        pipeline.generate_visualizations()
 
         logger.info(f"Results saved to: {output_path}")
 

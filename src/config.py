@@ -315,7 +315,7 @@ class DiscoveryConfig:
     INPUT_FILE: str = "data/unlisted_sentences.csv"
     TEXT_COLUMN: str = "text"
 
-    OUTPUT_DIR: str = "intent_discovery_results"
+    OUTPUT_DIR: str = "reports"
     OUTPUT_CSV: str = "discovered_intents.csv"
 
     # Model selection
@@ -355,7 +355,7 @@ class DiscoveryConfig:
 
     # Visualization
     CREATE_VISUALIZATIONS: bool = True
-    VIZ_OUTPUT_DIR: str = "intent_discovery_results/visualizations"
+    VIZ_OUTPUT_DIR: str = "reports"
 
     def __post_init__(self):
         """Validate configuration after initialization"""

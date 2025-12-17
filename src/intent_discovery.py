@@ -1,36 +1,24 @@
+import gc
+import re
+from pathlib import Path
+from typing import Dict, List, Tuple
+
 import numpy as np
 import pandas as pd
 import torch
-import gc
-import re
-from typing import List, Tuple, Dict, Optional
-from pathlib import Path
-
 from bertopic import BERTopic
-from bertopic.representation import (
-    PartOfSpeech,
-    TextGeneration,
-    MaximalMarginalRelevance,
-    PartOfSpeech,
-)
-from sentence_transformers import SentenceTransformer
-from transformers import (
-    AutoTokenizer,
-    AutoModelForCausalLM,
-    BitsAndBytesConfig,
-    pipeline,
-)
-from sklearn.feature_extraction.text import CountVectorizer
-from sklearn.metrics import silhouette_score, davies_bouldin_score
-from sklearn.metrics.pairwise import cosine_similarity
-from umap import UMAP
+from bertopic.representation import MaximalMarginalRelevance, TextGeneration
 from hdbscan import HDBSCAN
-import matplotlib.pyplot as plt
-import seaborn as sns
+from sentence_transformers import SentenceTransformer
+from sklearn.feature_extraction.text import CountVectorizer
+from sklearn.metrics import davies_bouldin_score, silhouette_score
+from transformers import (AutoModelForCausalLM, AutoTokenizer,
+                          BitsAndBytesConfig, pipeline)
+# from sklearn.metrics.pairwise import cosine_similarity
+from umap import UMAP
 
-from .logging_config import LoggingConfig
 from .config import DiscoveryConfig
-
+from .logging_config import LoggingConfig
 
 logger = LoggingConfig.get_logger(__name__)
 
@@ -101,6 +89,7 @@ class IntentCleaner:
             "ehm",
             "ok",
             "eccolo",
+            "ecco",
             "certo",
             "dunque",
             "aspetta",
@@ -281,6 +270,8 @@ class IntentDiscoveryPipeline:
         self.cleaner = IntentCleaner()
         self.topic_model = None
         self.embeddings = None
+        self.embedding_model = None
+        self.llm_labeler = None
 
     def build_model(self) -> BERTopic:
         """Build BERTopic model with local LLM"""
@@ -379,13 +370,26 @@ class IntentDiscoveryPipeline:
                 f"Need at least {self.config.MIN_CLUSTER_SIZE}"
             )
 
+        if self.embeddings is None:
+            logger.info("Generating sentence embeddings...")
+            self.embedding_model = SentenceTransformer(self.config.EMBEDDING_MODEL)
+            self.embeddings = self.embedding_model.encode(
+                cleaned_texts,
+                show_progress_bar=True,
+                convert_to_numpy=True,
+                batch_size=32,
+            )
+            logger.info(f"Embeddings shape: {self.embeddings.shape}")
+
         # Build model (if not already built)
         if self.topic_model is None:
             self.build_model()
 
         # Fit and transform
         logger.info(f"Clustering {len(cleaned_texts)} texts...")
-        topics, probs = self.topic_model.fit_transform(cleaned_texts)
+        topics, probs = self.topic_model.fit_transform(
+            cleaned_texts, embeddings=self.embeddings
+        )
 
         # Log results
         unique_topics = set(topics)
@@ -408,6 +412,41 @@ class IntentDiscoveryPipeline:
 
         return self.topic_model.get_topic_info()
 
+    def _get_topic_name(self, topic_id: int) -> str:
+        """
+        Centralized topic name extraction with proper cleaning.
+        """
+        if topic_id == -1:
+            return "NOISE"
+
+        try:
+            topic_info = self.get_topic_info()
+            row = topic_info[topic_info["Topic"] == topic_id]
+
+            if row.empty:
+                return f"Topic {topic_id}"
+
+            # Prefer LLM label, fallback to KeyBERT
+            source_col = "Main" if "Main" in topic_info.columns else "Name"
+            raw_label = row.iloc[0][source_col]
+
+            # Handle list/string formats
+            if isinstance(raw_label, list):
+                label_text = " ".join(str(x) for x in raw_label[:3])
+            else:
+                label_text = str(raw_label)
+
+            # Clean: remove topic ID prefix, quotes, underscores
+            clean = re.sub(r"^\d+\s*[_-]\s*", "", label_text)
+            clean = re.sub(r'[_\'"]+', " ", clean)
+            clean = re.sub(r"\s+", " ", clean).strip()
+
+            return clean
+
+        except Exception as e:
+            logger.warning(f"Could not extract name for topic {topic_id}: {e}")
+            return f"Topic {topic_id}"
+
     def get_representative_sentences(
         self,
         topic_id: int,
@@ -416,91 +455,93 @@ class IntentDiscoveryPipeline:
         probs: np.ndarray,
         n: int = 5,
     ) -> List[Tuple[str, float]]:
-        """Get most representative sentences for a topic"""
+        """
+        Get most representative sentences with deterministic tie-breaking.
+        """
         try:
             indices = [i for i, t in enumerate(topics) if t == topic_id]
             if len(indices) == 0:
                 return []
 
             topic_probs = (
-                probs[indices, topic_id] if topic_id >= 0 else [0] * len(indices)
+                probs[indices, topic_id]
+                if topic_id >= 0 and probs.shape[1] > topic_id
+                else np.zeros(len(indices))
             )
-            sorted_indices = np.argsort(topic_probs)[-n:][::-1]
 
-            return [(sentences[indices[i]], topic_probs[i]) for i in sorted_indices]
+            # Sort by probability (primary) and length (secondary)
+            lengths = np.array([len(sentences[i]) for i in indices])
+
+            # Lexicographic sort: primary by prob, secondary by length
+            sort_keys = np.lexsort((lengths, topic_probs))
+            sorted_indices = sort_keys[-n:][::-1]
+
+            return [
+                (sentences[indices[i]], float(topic_probs[i])) for i in sorted_indices
+            ]
 
         except Exception as e:
             logger.warning(f"Could not get representative sentences: {e}")
             return []
 
-    def _calculate_centroids(self, topics: List[int]):
-        """Helper to calculate centroids for coherence metric"""
-        if self.embeddings is None:
-            return
+    def _calculate_coherence(
+        self, topics: List[int], metric: str = "cosine"
+    ) -> pd.DataFrame:
+        """
+        Vectorized coherence calculation with configurable metric.
+        """
+        logger.info(f"Calculating semantic coherence (metric={metric})...")
 
-        self.unique_labels = sorted(list(set(topics)))
-        centroids_list = []
+        topics_arr = np.array(topics)
+        unique_labels = sorted(list(set(topics)))
+        coherence_scores = {}
+
+        # Calculate centroids
+        centroids = []
         valid_labels = []
 
-        for label in self.unique_labels:
+        for label in unique_labels:
             if label == -1:
-                continue  # Skip noise
-
-            mask = np.array(topics) == label
-            if sum(mask) > 0:
-                cluster_embeds = self.embeddings[mask]
-                centroid = np.mean(cluster_embeds, axis=0)
-                centroids_list.append(centroid)
-                valid_labels.append(label)
-
-        if centroids_list:
-            self.centroids = np.array(centroids_list)
-            self.unique_labels = valid_labels
-        else:
-            self.centroids = np.array([])
-            self.unique_labels = []
-
-    def _calculate_coherence(self, topics: List[int]) -> pd.DataFrame:
-        """Calculates Semantic Compactness (Avg Cosine Similarity to Centroid)"""
-        logger.info("Calculating Semantic Coherence (Compactness)...")
-
-        if self.centroids is None or len(self.centroids) == 0:
-            return pd.DataFrame()
-
-        coherence_scores = {}
-        topics_arr = np.array(topics)
-
-        # Determine which label column to use for the report
-        try:
-            topic_info = self.topic_model.get_topic_info()
-            if "Main" in topic_info.columns:
-                topic_names = dict(zip(topic_info["Topic"], topic_info["Main"]))
-            else:
-                # Fallback to KeyBERT representation if available, otherwise Name
-                # KeyBERT is often stored as a list in 'KeyBERT' or 'Representation' column
-                # BERTopic default 'Name' is "0_word_word"
-                topic_names = dict(zip(topic_info["Topic"], topic_info["Name"]))
-        except:
-            topic_names = {}
-
-        for label, centroid in zip(self.unique_labels, self.centroids):
-            cluster_embeds = self.embeddings[topics_arr == label]
-            if len(cluster_embeds) == 0:
                 continue
 
-            sims = cosine_similarity(cluster_embeds, centroid.reshape(1, -1))
+            mask = topics_arr == label
+            if sum(mask) == 0:
+                continue
+
+            cluster_embeds = self.embeddings[mask]
+            centroid = np.mean(cluster_embeds, axis=0)
+            centroids.append(centroid)
+            valid_labels.append(label)
+
+        if not centroids:
+            return pd.DataFrame()
+
+        centroids = np.array(centroids)
+
+        # Vectorized coherence computation
+        for label, centroid in zip(valid_labels, centroids):
+            cluster_embeds = self.embeddings[topics_arr == label]
+
+            if metric == "cosine":
+                # Vectorized cosine similarity
+                sims = np.dot(cluster_embeds, centroid) / (
+                    np.linalg.norm(cluster_embeds, axis=1) * np.linalg.norm(centroid)
+                    + 1e-8
+                )
+            elif metric == "euclidean":
+                # Convert distance to similarity
+                dists = np.linalg.norm(cluster_embeds - centroid, axis=1)
+                sims = 1 / (1 + dists)
+            else:
+                raise ValueError(f"Unknown metric: {metric}")
+
             avg_sim = np.mean(sims)
 
-            raw_name = topic_names.get(label, f"Topic {label}")
-            # Basic cleanup for the report
-            clean_name = str(raw_name)
-            if isinstance(raw_name, list):
-                clean_name = ", ".join(raw_name[:3])
-
             coherence_scores[label] = {
-                "name": clean_name,
-                "coherence_score": avg_sim,
+                "name": self._get_topic_name(label),
+                "coherence_score": float(avg_sim),
                 "size": len(cluster_embeds),
+                "std_coherence": float(np.std(sims)),
             }
 
         return pd.DataFrame(coherence_scores).T.sort_values(
@@ -508,7 +549,10 @@ class IntentDiscoveryPipeline:
         )
 
     def evaluate_clustering(
-        self, cleaned_texts: List[str], topics: List[int]
+        self,
+        cleaned_texts: List[str],
+        topics: List[int],
+        coherence_metric: str = "cosine",
     ) -> Dict[str, float]:
         """
         Calculate clustering quality metrics.
@@ -521,12 +565,15 @@ class IntentDiscoveryPipeline:
             "silhouette_score": 0.0,
             "davies_bouldin_score": 0.0,
             "avg_coherence_score": 0.0,
+            "num_clusters": len(set(topics)) - (1 if -1 in topics else 0),
+            "coverage": sum(1 for t in topics if t != -1) / len(topics),
         }
 
         # Generate embeddings if not cached
         if self.embeddings is None:
-            embedding_model = SentenceTransformer(self.config.EMBEDDING_MODEL)
-            self.embeddings = embedding_model.encode(
+            logger.warning("Embeddings not cached, regenerating...")
+            self.embedding_model = SentenceTransformer(self.config.EMBEDDING_MODEL)
+            self.embeddings = self.embedding_model.encode(
                 cleaned_texts, show_progress_bar=True, convert_to_numpy=True
             )
 
@@ -537,7 +584,11 @@ class IntentDiscoveryPipeline:
 
         if len(np.unique(filtered_topics)) >= 2:
             try:
-                sil_score = silhouette_score(filtered_embeddings, filtered_topics)
+                sil_score = silhouette_score(
+                    filtered_embeddings,
+                    filtered_topics,
+                    sample_size=min(10000, len(filtered_topics)),
+                )
                 db_score = davies_bouldin_score(filtered_embeddings, filtered_topics)
 
                 metrics["silhouette_score"] = float(sil_score)
@@ -551,8 +602,7 @@ class IntentDiscoveryPipeline:
             logger.warning("Not enough clusters for geometric metrics.")
 
         try:
-            self._calculate_centroids(topics)
-            coherence_df = self._calculate_coherence(topics)
+            coherence_df = self._calculate_coherence(topics, metric=coherence_metric)
 
             if not coherence_df.empty:
                 avg_coherence = coherence_df["coherence_score"].mean()
@@ -569,6 +619,41 @@ class IntentDiscoveryPipeline:
             logger.error(f"Failed to calculate coherence: {e}")
 
         return metrics
+
+    def generate_visualizations(self):
+        """
+        Generate BERTopic's built-in visualizations.
+        """
+        if not self.config.CREATE_VISUALIZATIONS:
+            return
+
+        logger.info("Generating visualizations...")
+        viz_dir = Path(self.config.VIZ_OUTPUT_DIR)
+        viz_dir.mkdir(parents=True, exist_ok=True)
+
+        try:
+            # Topic distance map
+            fig = self.topic_model.visualize_topics()
+            fig.write_html(str(viz_dir / "topic_map.html"))
+            logger.info(f"Topic map saved to {viz_dir / 'topic_map.html'}")
+
+            # Document clusters (if embeddings available)
+            if self.embeddings is not None:
+                fig = self.topic_model.visualize_documents(
+                    self.cleaned_texts,
+                    embeddings=self.embeddings,
+                    hide_annotations=True,
+                )
+                fig.write_html(str(viz_dir / "document_clusters.html"))
+                logger.info(f"Document clusters saved")
+
+            # Topic hierarchy
+            fig = self.topic_model.visualize_hierarchy()
+            fig.write_html(str(viz_dir / "hierarchy.html"))
+            logger.info(f"Hierarchy saved")
+
+        except Exception as e:
+            logger.warning(f"Visualization generation failed: {e}")
 
     def save_results(
         self,
@@ -632,9 +717,28 @@ class IntentDiscoveryPipeline:
         return df_results
 
     def cleanup(self):
-        """Free GPU memory"""
+        """
+        Proper cleanup of all GPU resources.
+        """
         logger.info("Cleaning up GPU memory...")
-        del self.topic_model
+
+        if self.llm_labeler:
+            try:
+                if hasattr(self.llm_labeler, "generator"):
+                    del self.llm_labeler.generator
+                if hasattr(self.llm_labeler, "tokenizer"):
+                    del self.llm_labeler.tokenizer
+                del self.llm_labeler
+            except Exception as e:
+                logger.warning(f"Error cleaning LLM: {e}")
+
+        if self.embedding_model:
+            del self.embedding_model
+
+        if self.topic_model:
+            del self.topic_model
+
+        self.embeddings = None
         torch.cuda.empty_cache()
         gc.collect()
         logger.info("Cleanup complete")

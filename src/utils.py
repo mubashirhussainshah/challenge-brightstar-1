@@ -3,12 +3,13 @@ Utility functions for the intent classification system
 Now with centralized logging configuration
 """
 
+from typing import List, Optional
+
 import numpy as np
 import torch
 from sklearn.metrics import accuracy_score, f1_score
-from typing import List, Optional
-from .logging_config import LoggingConfig
 
+from .logging_config import LoggingConfig
 
 # Module logger
 logger = LoggingConfig.get_logger(__name__)
@@ -143,6 +144,7 @@ def validate_input_data(texts: List[str], max_length: int = 512) -> List[str]:
     truncated_count = 0
 
     for i, text in enumerate(texts):
+        text = "" if text == None else text
         # Convert to string and strip whitespace
         text_str = str(text).strip()
 

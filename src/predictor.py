@@ -1,9 +1,10 @@
-import torch
-import numpy as np
 import logging
+from typing import List, Optional, Tuple
+
+import numpy as np
+import torch
 from tqdm import tqdm
-from transformers import AutoTokenizer, AutoModelForSequenceClassification
-from typing import List, Tuple, Optional
+from transformers import AutoModelForSequenceClassification, AutoTokenizer
 
 
 class IntentPredictor:

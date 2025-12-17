@@ -4,7 +4,7 @@
 # --- Data Paths ---
 INPUT_FILE: "data/unlisted_sentences.csv"
 TEXT_COLUMN: "text"
-OUTPUT_DIR: "intent_discovery_results"
+OUTPUT_DIR: "reports"
 OUTPUT_CSV: "discovered_intents.csv"
 
 # --- Model Configuration ---
@@ -43,4 +43,4 @@ SEED: 42
 
 # --- Visualization ---
 CREATE_VISUALIZATIONS: true
-VIZ_OUTPUT_DIR: "intent_discovery_results/visualizations"
+VIZ_OUTPUT_DIR: "reports"

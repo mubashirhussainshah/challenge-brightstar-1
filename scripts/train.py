@@ -7,10 +7,10 @@ from typing import Optional
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
 
 from src.config import TrainingConfig
-from src.utils import setup_logging, log_training_config
-from src.logging_config import LoggingConfig
 from src.data import load_and_prep_data
+from src.logging_config import LoggingConfig
 from src.training import train_final_model
+from src.utils import log_training_config, setup_logging
 
 
 def run_training_pipeline(
